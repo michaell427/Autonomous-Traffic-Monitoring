@@ -1,0 +1,54 @@
+# Data Configuration
+data:
+  # Dataset paths
+  root_dir: "."
+  images_dir: "bdd100k_images_100k/100k"
+  # Use full labels directory (contains detection annotations in JSON format)
+  det_labels_dir: "bdd100k_labels/100k"
+  seg_labels_dir: "bdd100k_seg_maps"
+  drivable_maps_dir: "bdd100k_drivable_maps/color_labels"
+  tracking_dir: "images20-track-train-1/bdd100k"
+  
+  # Dataset splits
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  
+  # Image settings
+  image_size: [640, 640]  # [height, width]
+  num_workers: 4
+  batch_size: 16
+  
+  # Augmentation
+  augmentation:
+    enabled: true
+    horizontal_flip: 0.5
+    rotation: 15  # degrees
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+    blur: 0.1
+    noise: 0.05
+
+# Classes for detection
+detection_classes:
+  - "car"
+  - "truck"
+  - "bus"
+  - "motorcycle"
+  - "person"
+  - "bike"
+  - "rider"
+  - "traffic light"
+  - "traffic sign"
+
+# Classes for segmentation
+segmentation_classes:
+  - "road"
+  - "lane"
+  - "sidewalk"
+  - "crosswalk"
+  - "traffic sign"
+  - "traffic light"
+

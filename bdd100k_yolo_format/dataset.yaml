@@ -1,0 +1,16 @@
+path: C:\Users\Michael\Projects\Traffic Analysis\Autonomous Traffic Monitoring & Analysis\Autonomous
+  Traffic Monitoring & Analysis\bdd100k_yolo_format
+train: train/images
+val: val/images
+test: test/images
+nc: 9
+names:
+- car
+- truck
+- bus
+- motorcycle
+- bike
+- person
+- rider
+- traffic light
+- traffic sign
