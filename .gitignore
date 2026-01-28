@@ -1,0 +1,114 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Data (keep structure but ignore large files)
+data/raw/
+data/processed/
+bdd100k_images_100k/
+bdd100k_labels/
+bdd100k_det_20_labels/
+bdd100k_drivable_maps/
+bdd100k_seg_maps/
+images20-track-*/
+*.jpg
+*.png
+*.jpeg
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.cache
+*.txt
+
+# Models and Checkpoints
+outputs/checkpoints/*.pt
+outputs/checkpoints/*.pth
+outputs/checkpoints/*.onnx
+outputs/checkpoints/*.engine
+outputs/yolo_training/**/*.pt
+outputs/yolo_training/**/*.pth
+models/*.pt
+models/*.pth
+*.weights
+*.pt
+yolo*.pt
+
+# Logs
+outputs/logs/
+*.log
+logs/
+wandb/
+tensorboard/
+
+# Large output files
+outputs/dataset_statistics.json
+
+# DVC
+.dvc/
+.dvcignore
+
+# Environment variables
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Gradle (avoid long filename issues on Windows)
+.gradle/
+
+# Project specific
+outputs/visualizations/*.png
+outputs/visualizations/*.jpg
+outputs/visualizations/*.mp4
+outputs/visualizations/*.gif
+outputs/yolo_vis/**/*.jpg
+outputs/yolo_vis/**/*.png
+
+# Keep directory structure but ignore contents
+!outputs/checkpoints/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/visualizations/.gitkeep
+
+# Documentation (excluded from version control)
+PROJECT_ROADMAP.md

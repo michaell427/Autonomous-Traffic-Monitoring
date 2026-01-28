@@ -1,0 +1,47 @@
+{
+  "train": {
+    "total_images": 70000,
+    "total_labels": 0,
+    "samples_analyzed": 0,
+    "class_distribution": {},
+    "total_objects": 0,
+    "objects_per_image": {
+      "mean": 0,
+      "median": 0,
+      "min": 0,
+      "max": 0
+    },
+    "bounding_boxes": {},
+    "attributes": {}
+  },
+  "val": {
+    "total_images": 10000,
+    "total_labels": 0,
+    "samples_analyzed": 0,
+    "class_distribution": {},
+    "total_objects": 0,
+    "objects_per_image": {
+      "mean": 0,
+      "median": 0,
+      "min": 0,
+      "max": 0
+    },
+    "bounding_boxes": {},
+    "attributes": {}
+  },
+  "test": {
+    "total_images": 20000,
+    "total_labels": 0,
+    "samples_analyzed": 0,
+    "class_distribution": {},
+    "total_objects": 0,
+    "objects_per_image": {
+      "mean": 0,
+      "median": 0,
+      "min": 0,
+      "max": 0
+    },
+    "bounding_boxes": {},
+    "attributes": {}
+  }
+}

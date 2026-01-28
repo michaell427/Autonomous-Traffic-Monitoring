@@ -1,0 +1,29 @@
+{
+  "dataset_size": {
+    "total_images": "100000",
+    "train": "70000",
+    "val": "10000",
+    "test": "20000"
+  },
+  "class_distribution": {
+    "most_common": "car",
+    "most_common_count": 10217,
+    "least_common": "train",
+    "imbalance_ratio": 10217.0
+  },
+  "bounding_boxes": {
+    "avg_width": 56.11696473776376,
+    "avg_height": 49.68280055780944,
+    "small_objects_pct": 56.29214705242549,
+    "invalid_boxes": 6
+  },
+  "objects_per_image": {
+    "mean": 18.394,
+    "max": 62
+  },
+  "decisions": {
+    "training_image_size": "[640, 640]",
+    "class_balancing_needed": "Yes/No - Fill in based on imbalance ratio",
+    "augmentation_strategy": "Fill in based on weather/scene distribution"
+  }
+}

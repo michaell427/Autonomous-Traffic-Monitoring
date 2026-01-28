@@ -1,0 +1,44 @@
+# Detection Model Configuration
+model:
+  name: "yolov8"
+  version: "yolov8n"  # Options: yolov8n, yolov8s, yolov8m, yolov8l, yolov8x
+  num_classes: 10
+  pretrained: true
+
+training:
+  epochs: 100
+  batch_size: 16
+  learning_rate: 0.001
+  weight_decay: 0.0005
+  momentum: 0.937
+  warmup_epochs: 3
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.1
+  
+  # Optimizer
+  optimizer: "SGD"  # Options: SGD, Adam, AdamW
+  
+  # Learning rate scheduler
+  lr_scheduler: "cosine"  # Options: linear, cosine, step
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+
+validation:
+  val_interval: 1  # Validate every N epochs
+  save_best: true
+  save_period: 10  # Save checkpoint every N epochs
+
+data:
+  config_path: "configs/data_config.yaml"
+
+outputs:
+  checkpoint_dir: "outputs/checkpoints"
+  log_dir: "outputs/logs"
+  tensorboard_dir: "outputs/logs/tensorboard"
+
+device: "cuda"  # Options: cuda, cpu
+
