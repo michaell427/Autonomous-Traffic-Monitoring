@@ -112,3 +112,14 @@ outputs/yolo_vis/**/*.png
 
 # Documentation (excluded from version control)
 PROJECT_ROADMAP.md
+project_ideas_ml_cv.md
+resume_ml_focused.md
+resume_*.md
+comprehensive_cv_project.md
+INTERVIEW_TRAFFIC_MONITORING_PROJECT.md
+docs/INTERVIEW_TRAFFIC_MONITORING_PROJECT.md
+docs/eda_findings.md
+docs/eda_findings_template.md
+
+# Interview prep (personal notes)
+INTERVIEW_TRAFFIC_MONITORING_PROJECT.md
