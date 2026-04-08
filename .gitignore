@@ -40,6 +40,7 @@ ENV/
 # Data (keep structure but ignore large files)
 data/raw/
 data/processed/
+BDDA/
 bdd100k_images_100k/
 bdd100k_labels/
 bdd100k_det_20_labels/
@@ -80,6 +81,8 @@ tensorboard/
 
 # Large output files
 outputs/dataset_statistics.json
+outputs/inference/
+outputs/yolo_training/
 
 # DVC
 .dvc/
