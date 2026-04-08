@@ -9,12 +9,13 @@ Run from project root (venv active):
 - **◀ media / media ▶** — previous / next file in the queue.
 - **◀ frame / frame ▶** — previous / next frame (videos only).
 - **Play / Pause** — auto-advance frames at the clip’s FPS (before or after view; **Space** still toggles).
+- **Tracking IDs** — optional video mode for persistent IDs (ByteTrack/BoT-SORT).
 - **Before / After** — toggle original vs YOLO overlay (or **Space**).
 
 Keyboard: **Space** = before/after; **P** = play/pause (video); **← / →** = frame (video); **[** / **]** = prev/next media.
 
-Video uses per-frame detection (cached, bounded). For full-sequence tracking use
-``python src/inference.py ... --track``.
+Video defaults to per-frame detection. Enable **Tracking IDs** to use sequential
+multi-object tracking with persistent IDs in the viewer.
 
 Display uses Tk + Pillow, so **opencv-python-headless** is fine (no separate OpenCV window).
 """
@@ -76,12 +77,16 @@ class UploadViewerApp:
         self,
         root: tk.Tk,
         model: YOLO,
+        weights_path: Path,
+        tracker: str,
         conf: float,
         imgsz: int,
         initial_files: Optional[List[Path]] = None,
     ) -> None:
         self.root = root
         self.model = model
+        self.weights_path = weights_path
+        self.tracker = tracker
         self.conf = conf
         self.imgsz = imgsz
 
@@ -92,6 +97,9 @@ class UploadViewerApp:
         self._cap: Optional[cv2.VideoCapture] = None
         self._video_n_frames: int = 0
         self._video_cache: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        self._video_track_cache: Dict[int, np.ndarray] = {}
+        self._track_ready_upto: int = -1
+        self._track_model: Optional[YOLO] = None
 
         self._image_before: Optional[np.ndarray] = None
         self._image_after: Optional[np.ndarray] = None
@@ -103,6 +111,7 @@ class UploadViewerApp:
         self._playing: bool = False
         self._play_after_id: Optional[str] = None
         self._video_fps: float = 24.0
+        self.use_tracking_ids = tk.BooleanVar(value=False)
 
         root.title("Traffic — upload & before/after")
         root.minsize(720, 560)
@@ -166,6 +175,13 @@ class UploadViewerApp:
 
         self.btn_toggle = ttk.Button(ctrl, text="Before / After", command=self._toggle_before_after)
         self.btn_toggle.pack(side=tk.LEFT)
+        self.chk_tracking = ttk.Checkbutton(
+            ctrl,
+            text="Tracking IDs",
+            variable=self.use_tracking_ids,
+            command=self._on_toggle_tracking_ids,
+        )
+        self.chk_tracking.pack(side=tk.LEFT, padx=(12, 0))
 
         preview_wrap = ttk.Frame(right, relief=tk.SUNKEN, borderwidth=1)
         preview_wrap.pack(fill=tk.BOTH, expand=True)
@@ -235,6 +251,7 @@ class UploadViewerApp:
         self.preview_label.configure(image="", text="No file loaded")
         self._photo = None
         self.btn_play.configure(text="Play", state=tk.DISABLED)
+        self.chk_tracking.configure(state=tk.DISABLED)
 
     def _on_close(self) -> None:
         self._release_video()
@@ -275,7 +292,13 @@ class UploadViewerApp:
             self._cap.release()
             self._cap = None
         self._video_cache.clear()
+        self._reset_tracking_state()
         self._video_n_frames = 0
+
+    def _reset_tracking_state(self) -> None:
+        self._video_track_cache.clear()
+        self._track_ready_upto = -1
+        self._track_model = None
 
     def _load_current_media(self) -> None:
         self._release_video()
@@ -295,6 +318,7 @@ class UploadViewerApp:
         try:
             if is_video(path):
                 self._set_frame_buttons_state(True)
+                self.chk_tracking.configure(state=tk.NORMAL)
                 cap = cv2.VideoCapture(str(path))
                 if not cap.isOpened():
                     self.status_var.set(f"Could not open video: {path.name}")
@@ -309,6 +333,7 @@ class UploadViewerApp:
                 self._ensure_video_pair(0)
             else:
                 self._set_frame_buttons_state(False)
+                self.chk_tracking.configure(state=tk.DISABLED)
                 bgr = cv2.imread(str(path))
                 if bgr is None:
                     self.status_var.set(f"Could not read image: {path.name}")
@@ -332,6 +357,7 @@ class UploadViewerApp:
         self.btn_play.configure(state=state)
         if not video:
             self._stop_playback()
+            self.chk_tracking.configure(state=tk.DISABLED)
 
     def _ensure_video_pair(self, frame_index: int) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if self._cap is None:
@@ -350,15 +376,56 @@ class UploadViewerApp:
         self._video_cache[frame_index] = (frame, after)
         return frame, after
 
+    def _get_track_model(self) -> YOLO:
+        if self._track_model is None:
+            self._track_model = YOLO(str(self.weights_path))
+        return self._track_model
+
+    def _ensure_video_tracked(self, frame_index: int) -> Optional[np.ndarray]:
+        if frame_index in self._video_track_cache:
+            return self._video_track_cache[frame_index]
+
+        # If user seeks backward beyond prepared tracker history, rebuild from frame 0.
+        if frame_index <= self._track_ready_upto:
+            self._reset_tracking_state()
+
+        track_model = self._get_track_model()
+        start = self._track_ready_upto + 1
+        for i in range(start, frame_index + 1):
+            before, _ = self._ensure_video_pair(i)
+            if before is None:
+                return None
+            results = track_model.track(
+                source=before,
+                conf=self.conf,
+                imgsz=self.imgsz,
+                tracker=self.tracker,
+                persist=True,
+                verbose=False,
+            )
+            tracked = results[0].plot()
+            if tracked.shape != before.shape:
+                tracked = cv2.resize(tracked, (before.shape[1], before.shape[0]))
+            if len(self._video_track_cache) >= _MAX_VIDEO_CACHE_FRAMES:
+                del self._video_track_cache[min(self._video_track_cache.keys())]
+            self._video_track_cache[i] = tracked
+            self._track_ready_upto = i
+        return self._video_track_cache.get(frame_index)
+
     def _current_display_bgr(self) -> Optional[np.ndarray]:
         if not self.paths:
             return None
         path = self.paths[self.media_index]
         if is_video(path):
-            before, after = self._ensure_video_pair(self.video_frame_index)
-            if before is None or after is None:
+            before, det_after = self._ensure_video_pair(self.video_frame_index)
+            if before is None or det_after is None:
                 return None
-            return before if self.show_before else after
+            if self.show_before:
+                return before
+            if self.use_tracking_ids.get():
+                tracked_after = self._ensure_video_tracked(self.video_frame_index)
+                return tracked_after if tracked_after is not None else det_after
+            return det_after
         if self._image_before is None or self._image_after is None:
             return None
         return self._image_before if self.show_before else self._image_after
@@ -374,8 +441,9 @@ class UploadViewerApp:
             total = self._video_n_frames if self._video_n_frames > 0 else "?"
             fr = self.video_frame_index + 1
             mode = "BEFORE" if self.show_before else "AFTER"
+            tracking_tag = " | TRACK" if self.use_tracking_ids.get() else ""
             self.status_var.set(
-                f"{mode}  |  {path.name}  |  media {pos}/{n}  |  frame {fr}/{total}"
+                f"{mode}{tracking_tag}  |  {path.name}  |  media {pos}/{n}  |  frame {fr}/{total}"
             )
         else:
             mode = "BEFORE" if self.show_before else "AFTER"
@@ -404,6 +472,18 @@ class UploadViewerApp:
         if not self.paths:
             return
         self.show_before = not self.show_before
+        self._refresh_all()
+
+    def _on_toggle_tracking_ids(self) -> None:
+        if not self.paths:
+            self.use_tracking_ids.set(False)
+            return
+        path = self.paths[self.media_index]
+        if not is_video(path):
+            self.use_tracking_ids.set(False)
+            return
+        self._stop_playback()
+        self._reset_tracking_state()
         self._refresh_all()
 
     def _toggle_play(self) -> None:
@@ -502,6 +582,7 @@ def main() -> None:
     )
     parser.add_argument("--conf", type=float, default=0.25)
     parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--tracker", type=str, default="bytetrack.yaml")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
@@ -520,7 +601,15 @@ def main() -> None:
     model = YOLO(str(weights))
 
     root = tk.Tk()
-    app = UploadViewerApp(root, model, args.conf, args.imgsz, initial_files=initial or None)
+    app = UploadViewerApp(
+        root,
+        model,
+        weights,
+        args.tracker,
+        args.conf,
+        args.imgsz,
+        initial_files=initial or None,
+    )
     root.mainloop()
 
 
