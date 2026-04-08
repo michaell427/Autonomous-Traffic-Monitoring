@@ -20,6 +20,22 @@
 ### Overview
 A production-ready computer vision system that combines object detection, instance segmentation, and multi-object tracking in a unified framework to solve real-world traffic monitoring challenges. This project demonstrates expertise across the full ML lifecycle: data engineering, model development, optimization, deployment, and evaluation.
 
+### Repository status (this codebase)
+
+This file is the **project proposal and career narrative**; the **running system** lives in the same repo as the code below.
+
+| Area | In repo today |
+|------|----------------|
+| BDD100K loaders, augmentation, preprocess CLI | Yes (`src/data/`, `configs/data_config.yaml`) |
+| YOLO-format export + Ultralytics train/val | Yes (`bdd100k_yolo_format/`, `src/models/train_yolo.py`, `src/models/evaluate_yolo.py`) |
+| Alternate detection training via YAML | Yes (`src/models/train_detection.py`, `configs/detection_config.yaml`) |
+| Experiment / metrics log (template) | Yes (`docs/experiment_log.md`) |
+| Detection inference (image / video / webcam) | Yes (`src/inference.py`) |
+| Multi-object tracking on frame sequences | Yes (`src/inference.py --track`, ByteTrack/BoT-SORT via Ultralytics) |
+| Segmentation training, unified det+seg+track pipeline | Planned (see `PROJECT_ROADMAP.md`) |
+
+**Where to start:** [QUICKSTART.md](QUICKSTART.md) and [README.md](README.md). **Execution plan:** [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md).
+
 ---
 
 ## Why This Replaces Both Projects
@@ -312,6 +328,8 @@ A production-ready computer vision system that combines object detection, instan
 
 ## Resume Bullets (4-5 bullets)
 
+**Important:** The bullets below are **example targets** for when detection, segmentation, tracking, and deployment are finished. Replace any numbers with **your measured** metrics from `docs/experiment_log.md` and evaluation runs so your resume stays truthful.
+
 **Option 1: Technical Focus**
 - Built real-time traffic monitoring system combining object detection (YOLOv8), lane segmentation (Mask R-CNN), and multi-object tracking (DeepSORT) to analyze vehicle and pedestrian behavior, achieving 0.68 mAP detection, 0.62 mask mAP for lane segmentation, and 0.75 MOTA on BDD100K traffic dataset.
 
@@ -426,12 +444,16 @@ If you want something more application-focused, consider:
 
 ## Getting Started
 
-1. **Choose Dataset**: COCO (general) or domain-specific (vehicles, sports, etc.)
-2. **Set Up Environment**: PyTorch/TensorFlow, YOLO, OpenCV
-3. **Start with Detection**: Get YOLOv8 working first
-4. **Add Segmentation**: Extend to instance segmentation
-5. **Integrate Tracking**: Add multi-object tracking
-6. **Optimize & Deploy**: Quantization, deployment, benchmarking
+**In this repository (BDD100K + YOLO):**
+
+1. Clone the repo, create a venv, `pip install -r requirements.txt` (see README for Detectron2 caveats on Windows).
+2. Point `configs/data_config.yaml` at your BDD100K image and label roots; ensure `bdd100k_yolo_format/dataset.yaml` and folders exist for Ultralytics.
+3. Run `python src/data/preprocess.py --config configs/data_config.yaml --all` to validate the PyTorch data path.
+4. Run `python src/models/train_yolo.py --test-only`, then train with `train_yolo.py` (or `train_detection.py` if you prefer that entrypoint).
+5. Record metrics in `docs/experiment_log.md`; run `python src/models/evaluate_yolo.py --model .../best.pt --dataset bdd100k_yolo_format/dataset.yaml`.
+6. **Then** (roadmap): segmentation model, richer MOT metrics / custom trackers, unified multi-task inference, optimization and deployment. Use `src/inference.py` for detection; add **`--track`** on video/webcam/folders for ByteTrack-style IDs.
+
+**Greenfield / other datasets:** You can still follow the phase outline above (choose dataset → detection → segmentation → tracking → deploy); use the same repo layout where possible.
 
 ---
 

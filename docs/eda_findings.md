@@ -16,8 +16,9 @@
 
 ### Dataset Structure
 - Images directory: `bdd100k_images_100k/100k`
-- Detection labels: `bdd100k_det_20_labels`
-- Full labels: `bdd100k_labels/100k`
+- Detection labels (default in `configs/data_config.yaml`): `bdd100k_labels/100k` (JSON)
+- Alternate BDD100K layout: `bdd100k_det_20_labels` — if you use this, update `det_labels_dir` in `configs/data_config.yaml`
+- YOLO export for Ultralytics: `bdd100k_yolo_format/` + `dataset.yaml`
 - Segmentation maps: `bdd100k_seg_maps`
 - Drivable maps: `bdd100k_drivable_maps`
 

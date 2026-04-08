@@ -23,9 +23,9 @@ This document outlines the step-by-step implementation plan for building the tra
 - [x] Data loading pipeline
 - [x] Augmentation pipeline
 - [x] Configuration system
-- [x] EDA notebook
+- [x] EDA notes (`docs/eda_findings.md`; optional local notebooks)
 
-**Next**: Review EDA findings and adjust data pipeline accordingly
+**Next**: Keep EDA findings in sync with the data pipeline and YOLO export
 
 ---
 
@@ -43,7 +43,7 @@ This document outlines the step-by-step implementation plan for building the tra
 
 ### Step 1.2: Fix Data Pipeline Issues
 **Action Items**:
-- [ ] Test data loading: `python test_data_pipeline.py`
+- [ ] Test data loading: `python test_data_pipeline_step1_2.py`
 - [ ] Fix any path or format issues
 - [ ] Verify label format compatibility
 - [ ] Test augmentation pipeline
@@ -93,19 +93,19 @@ This document outlines the step-by-step implementation plan for building the tra
 
 #### 2.1.1: Setup YOLOv8 Training
 **Action Items**:
-- [ ] Install/verify Ultralytics YOLO
-- [ ] Convert BDD100K to YOLO format OR adapt training script
-- [ ] Create YOLO dataset configuration file
-- [ ] Test data loading with YOLO format
+- [x] Install/verify Ultralytics YOLO (`requirements.txt`)
+- [x] BDD100K YOLO export layout (`bdd100k_yolo_format/`, `dataset.yaml`; repair scripts in `src/data/`)
+- [x] YOLO dataset configuration file (`bdd100k_yolo_format/dataset.yaml`)
+- [x] Test data loading with YOLO format (`python src/models/train_yolo.py --test-only`)
 
 **Output**: YOLO-compatible dataset
 
 #### 2.1.2: Baseline Training
 **Action Items**:
-- [ ] Train YOLOv8n (nano) as quick baseline
-- [ ] Monitor training with TensorBoard
-- [ ] Evaluate on validation set
-- [ ] Document baseline metrics
+- [x] Train YOLOv8n (nano) as quick baseline (`src/models/train_yolo.py`, runs under `outputs/yolo_training/`)
+- [ ] Monitor training with TensorBoard (optional; Ultralytics also emits plots)
+- [x] Evaluate on validation set (`src/models/evaluate_yolo.py`)
+- [ ] Fill in measured metrics in `docs/experiment_log.md` after each serious run
 
 **Output**: Baseline model with metrics
 
@@ -177,6 +177,8 @@ This document outlines the step-by-step implementation plan for building the tra
 ---
 
 ### Step 2.3: Multi-Object Tracking
+
+**In this repo (baseline):** YOLO detections + **ByteTrack** or **BoT-SORT** via Ultralytics — `python src/inference.py ... --track` (see README). That satisfies “tracker integrated with the detector” for video / webcam / image folders. **Still open** below: formal MOT benchmarks (MOTA, IDF1), custom Re-ID, and tuning tracker YAMLs for your cameras.
 
 #### 2.3.1: Choose Tracking Algorithm
 **Decision**: DeepSORT vs ByteTrack vs Custom
@@ -364,6 +366,7 @@ This document outlines the step-by-step implementation plan for building the tra
 #### 4.3.1: Visualization Tools
 **Action Items**:
 - [ ] Create video visualization with boxes, masks, tracks
+- [ ] **Before/after viewer**: UI or window showing raw input next to model output (same frame/time), for demos and QA—e.g. OpenCV composite, Gradio, or Streamlit, fed by the same weights/sources as `src/inference.py`
 - [ ] Build performance dashboard
 - [ ] Create interactive demo
 - [ ] Generate demo video/GIF
@@ -430,22 +433,43 @@ This document outlines the step-by-step implementation plan for building the tra
 
 ### Test Data Pipeline
 ```bash
-python test_data_pipeline.py
+python test_data_pipeline_step1_2.py
 ```
 
-### Run EDA
-```bash
-jupyter notebook notebooks/01_eda_bdd100k.ipynb
-```
+### Review EDA Notes
+EDA write-ups live in `docs/eda_findings.md`. Add a local `notebooks/` folder if you use Jupyter; no notebook path is required by the training scripts.
 
 ### Validate Dataset
 ```bash
-python src/data/preprocess.py --all
+python src/data/preprocess.py --config configs/data_config.yaml --all
 ```
 
-### Train Detection Model
+### Train Detection (YOLO / BDD100K)
+```bash
+python src/models/train_yolo.py --test-only
+python src/models/train_yolo.py --model n --epochs 100 --batch 16 --project outputs/yolo_training --name my_run
+```
+
+### Train Detection (alternate config entrypoint)
 ```bash
 python src/models/train_detection.py --config configs/detection_config.yaml
+```
+
+### Evaluate YOLO Weights
+```bash
+python src/models/evaluate_yolo.py --model outputs/yolo_training/<run>/weights/best.pt --dataset bdd100k_yolo_format/dataset.yaml --split val
+```
+
+### Detection inference (image / video / webcam)
+```bash
+python src/inference.py --weights outputs/yolo_training/<run>/weights/best.pt --source path/to/video.mp4
+python src/inference.py --weights yolov8n.pt --source 0 --show
+```
+
+### Tracking (video / webcam / image folder)
+```bash
+python src/inference.py --weights outputs/yolo_training/<run>/weights/best.pt --source path/to/video.mp4 --track
+python src/inference.py --weights yolov8n.pt --source 0 --track --show
 ```
 
 ---
@@ -461,8 +485,24 @@ python src/models/train_detection.py --config configs/detection_config.yaml
 
 ## 🔄 Current Status
 
-**Current Phase**: Phase 1 - Data Engineering & Preparation
-**Next Step**: Review EDA findings and fix any data pipeline issues
+**Where things stand**
 
-**Last Updated**: [Update this as you progress]
+| Roadmap area | Code / docs today |
+|--------------|-------------------|
+| Phase 0 | Done |
+| Phase 1 | Pipelines and reports exist; many 1.x checkboxes are **ongoing hygiene** (EDA write-up, `test_data_pipeline_step1_2.py`, tightening validation) — not blocking detection. |
+| Phase 2.1 Detection | Train / eval / infer paths exist; **finish** `docs/experiment_log.md`, test-set eval, and optional model-size comparison (2.1.3–2.1.4). |
+| Phase 2.3 Tracking (baseline) | **Done in-repo:** `src/inference.py --track` (ByteTrack default). **Not done:** MOT metrics on a standard benchmark, heavy tracker tuning. |
+| Phase 2.2 Segmentation | Not started — next **big** feature if you want masks/lanes. |
+| Phase 2.4 Unified pipeline | Not started — det + (future) seg + track in one CLI. |
+| Phases 3–4 | Optimization, API, demos, documentation polish. |
+
+**Suggested order for “what to do next”**
+
+1. **Close the detection loop (2.1.2 / 2.1.4):** run `evaluate_yolo.py`, fill **`docs/experiment_log.md`**, optionally run on **test** split and note failure cases.  
+2. **Either** start **Phase 2.2 segmentation** (if lanes/masks matter) **or** deepen **2.3** (MOT evaluation script / dataset) if IDs and metrics matter more.  
+3. **Phase 2.4** when you have two modalities you actually want in one run.  
+4. **Phase 3–4** when you need speed, deployment, or portfolio polish.
+
+**Last Updated:** April 6, 2026
 
