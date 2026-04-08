@@ -115,3 +115,4 @@ outputs/yolo_vis/**/*.png
 
 # Documentation (excluded from version control)
 PROJECT_ROADMAP.md
+context.md
