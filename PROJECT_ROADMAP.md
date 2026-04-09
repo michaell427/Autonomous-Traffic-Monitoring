@@ -139,6 +139,8 @@ This document outlines the step-by-step implementation plan for building the tra
 
 ### Step 2.2: Instance Segmentation Model
 
+**Handoff for “drivable area” semantic segmentation first:** See [docs/segmentation_drivable_handoff.md](docs/segmentation_drivable_handoff.md) for phased tasks (data → train → inference CLI → optional demo overlay). That doc distinguishes **semantic drivable** masks from **YOLO instance seg** so implementers do not mix label formats.
+
 #### 2.2.1: Choose Segmentation Approach
 **Decision**: YOLOv8-seg vs Mask R-CNN
 - **YOLOv8-seg**: Faster, easier integration with detection
@@ -178,18 +180,22 @@ This document outlines the step-by-step implementation plan for building the tra
 
 ### Step 2.3: Multi-Object Tracking
 
-**In this repo (baseline):** YOLO detections + **ByteTrack** or **BoT-SORT** via Ultralytics — `python src/inference.py ... --track` (see README). That satisfies “tracker integrated with the detector” for video / webcam / image folders. **Still open** below: formal MOT benchmarks (MOTA, IDF1), custom Re-ID, and tuning tracker YAMLs for your cameras.
+**In this repo (baseline):** YOLO detections + **ByteTrack** or **BoT-SORT** via Ultralytics — `python src/inference.py ... --track` (see README). That satisfies “tracker integrated with the detector” for video / webcam / image folders.
+
+**Desktop demo:** [`demo_upload_window.py`](demo_upload_window.py) can show **persistent track IDs** in the UI (optional **Tracking IDs** checkbox) using the same Ultralytics tracker stack (`--tracker`, default `bytetrack.yaml`). Per-frame preview there is still heavier than batch `inference.py`; **performance polish** (threading, smaller preview, ONNX) is a later optimization.
+
+**Still open:** formal MOT benchmarks (MOTA, IDF1), custom Re-ID, and tuning tracker YAMLs for your cameras.
 
 #### 2.3.1: Choose Tracking Algorithm
 **Decision**: DeepSORT vs ByteTrack vs Custom
 - **DeepSORT**: Classic, well-tested
-- **ByteTrack**: State-of-the-art, better occlusion handling
+- **ByteTrack**: State-of-the-art, better occlusion handling ( **in use via Ultralytics** )
 - **Custom**: Full control, more work
 
 **Action Items**:
-- [ ] Research tracking algorithms
-- [ ] Implement chosen tracker
-- [ ] Integrate with detection model
+- [x] Research tracking algorithms (baseline: ByteTrack / BoT-SORT through Ultralytics)
+- [x] Integrate tracker with detection (`src/inference.py --track`, `src/tracking.run_tracking`, optional IDs in `demo_upload_window.py`)
+- [ ] Custom DeepSORT / Re-ID or swap-in trackers beyond Ultralytics configs (optional)
 
 **Output**: Tracking implementation
 
@@ -212,9 +218,9 @@ This document outlines the step-by-step implementation plan for building the tra
 **Output**: Tracking evaluation (MOTA > 0.7 target)
 
 **Deliverables**:
-- ✅ Working tracking system
-- ✅ Tracking metrics (MOTA > 0.7)
-- ✅ Tracking visualizations
+- ✅ Working tracking integration (Ultralytics + optional IDs in `demo_upload_window.py`)
+- [ ] Tracking metrics at target (MOTA / IDF1 on a benchmark — not automated in repo yet)
+- [ ] Tracking evaluation report beyond saved videos and ad-hoc demos
 
 ---
 
@@ -365,10 +371,13 @@ This document outlines the step-by-step implementation plan for building the tra
 
 #### 4.3.1: Visualization Tools
 **Action Items**:
-- [ ] Create video visualization with boxes, masks, tracks
-- [ ] **Before/after viewer**: UI or window showing raw input next to model output (same frame/time), for demos and QA—e.g. OpenCV composite, Gradio, or Streamlit, fed by the same weights/sources as `src/inference.py`
+- [ ] Create video visualization with boxes, masks, tracks (batch export via `inference.py` exists; rich mask overlay = after segmentation)
+- [x] **Before/after viewers** (same weights as `src/inference.py`):
+  - [x] [`demo_before_after.py`](demo_before_after.py) — OpenCV folder/single image, Space / arrows (**needs GUI OpenCV**)
+  - [x] [`demo_upload_window.py`](demo_upload_window.py) — **Tk** multi-file queue, before/after, frame + media nav, **Play/Pause**, optional **tracking IDs**, **Canvas** preview (works with headless OpenCV for I/O)
+  - [x] [`app_upload_before_after.py`](app_upload_before_after.py) — **Gradio** browser upload (optional `requirements-webui.txt`)
 - [ ] Build performance dashboard
-- [ ] Create interactive demo
+- [ ] Create interactive demo (beyond current viewers)
 - [ ] Generate demo video/GIF
 
 **Output**: Visualization tools and demo
@@ -472,6 +481,13 @@ python src/inference.py --weights outputs/yolo_training/<run>/weights/best.pt --
 python src/inference.py --weights yolov8n.pt --source 0 --track --show
 ```
 
+### Desktop upload / before-after / optional tracking IDs (Tk)
+```bash
+python demo_upload_window.py --weights yolov8n.pt
+# Optional: preload files, BoT-SORT
+python demo_upload_window.py --weights yolov8n.pt --file clip.mp4 --tracker botsort.yaml
+```
+
 ---
 
 ## 📝 Notes
@@ -492,10 +508,12 @@ python src/inference.py --weights yolov8n.pt --source 0 --track --show
 | Phase 0 | Done |
 | Phase 1 | Pipelines and reports exist; many 1.x checkboxes are **ongoing hygiene** (EDA write-up, `test_data_pipeline_step1_2.py`, tightening validation) — not blocking detection. |
 | Phase 2.1 Detection | Train / eval / infer paths exist; **finish** `docs/experiment_log.md`, test-set eval, and optional model-size comparison (2.1.3–2.1.4). |
-| Phase 2.3 Tracking (baseline) | **Done in-repo:** `src/inference.py --track` (ByteTrack default). **Not done:** MOT metrics on a standard benchmark, heavy tracker tuning. |
+| Phase 2.3 Tracking (baseline) | **Done in-repo:** `src/inference.py --track` (ByteTrack default); **Tk demo** `demo_upload_window.py` optional **Tracking IDs**. **Not done:** MOT metrics on a standard benchmark, heavy tracker tuning, real-time desktop performance. |
 | Phase 2.2 Segmentation | Not started — next **big** feature if you want masks/lanes. |
 | Phase 2.4 Unified pipeline | Not started — det + (future) seg + track in one CLI. |
-| Phases 3–4 | Optimization, API, demos, documentation polish. |
+| Phase 4.3 Demos | **Done (MVP):** OpenCV before/after, Tk upload viewer (+ play, tracking toggle), Gradio upload app. **Open:** dashboard, scripted demo GIF/video, mask overlays. |
+| Phases 3–4 (rest) | Optimization, deployment API, broader evaluation write-ups. |
+| Local data | **BDDA** (BDD-Attention) and similar large folders are **gitignored** (`.gitignore`); keep datasets local or via DVC. |
 
 **Suggested order for “what to do next”**
 
@@ -504,5 +522,5 @@ python src/inference.py --weights yolov8n.pt --source 0 --track --show
 3. **Phase 2.4** when you have two modalities you actually want in one run.  
 4. **Phase 3–4** when you need speed, deployment, or portfolio polish.
 
-**Last Updated:** April 6, 2026
+**Last Updated:** April 8, 2026
 

@@ -24,9 +24,18 @@ Add more rows as you run new experiments. If you change class list or dataset YA
 
 - Detection mAP (overall) > **0.6** — track your best mAP50-95 here and in project docs when you hit milestones.
 
+## Drivable segmentation (DeepLabV3)
+
+Train: `python src/models/train_drivable_seg.py --config configs/drivable_seg_config.yaml` — best weights `outputs/drivable_seg/<run_name>/best.pth`. Optional: append a row with `--log-experiment`.
+
+| Date (UTC) | Run name | val mIoU | Checkpoint | Notes |
+|------------|----------|----------|------------|-------|
+| | | | | |
+
 ## Related paths
 
 - Data config: `configs/data_config.yaml`
+- Drivable seg config: `configs/drivable_seg_config.yaml`
 - Detection training config (alternate entry): `configs/detection_config.yaml`
 - YOLO data YAML: `bdd100k_yolo_format/dataset.yaml`
 - Qualitative checks on new video or images: `python src/inference.py --weights ... --source ...` (saved under `outputs/inference/` by default)

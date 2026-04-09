@@ -32,6 +32,7 @@ This file is the **project proposal and career narrative**; the **running system
 | Experiment / metrics log (template) | Yes (`docs/experiment_log.md`) |
 | Detection inference (image / video / webcam) | Yes (`src/inference.py`) |
 | Multi-object tracking on frame sequences | Yes (`src/inference.py --track`, ByteTrack/BoT-SORT via Ultralytics) |
+| Interactive demos (before/after, upload, optional track IDs in UI) | Yes (`demo_before_after.py`, `demo_upload_window.py`, `app_upload_before_after.py`) |
 | Segmentation training, unified det+seg+track pipeline | Planned (see `PROJECT_ROADMAP.md`) |
 
 **Where to start:** [QUICKSTART.md](QUICKSTART.md) and [README.md](README.md). **Execution plan:** [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md).

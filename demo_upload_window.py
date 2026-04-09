@@ -17,7 +17,8 @@ Keyboard: **Space** = before/after; **P** = play/pause (video); **← / →** = 
 Video defaults to per-frame detection. Enable **Tracking IDs** to use sequential
 multi-object tracking with persistent IDs in the viewer.
 
-Display uses Tk + Pillow, so **opencv-python-headless** is fine (no separate OpenCV window).
+Preview uses a **Tk Canvas** + Pillow (not a Label), so the image does not drive window
+geometry. **opencv-python-headless** is fine (no separate OpenCV window).
 """
 
 from __future__ import annotations
@@ -41,9 +42,16 @@ VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 _MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
 _MAX_VIDEO_CACHE_FRAMES = 120
 
-# Preview max size (widget grows with window; we scale image to fit)
-_PREVIEW_MAX_W = 960
-_PREVIEW_MAX_H = 720
+# Fallback bounds when the canvas is not mapped yet (avoid oversized PhotoImage).
+_PREVIEW_FALLBACK_MAX_W = 512
+_PREVIEW_FALLBACK_MAX_H = 384
+_PREVIEW_ABSOLUTE_CAP_W = 1600
+_PREVIEW_ABSOLUTE_CAP_H = 1200
+# Windows sends many Configure events during maximize/fullscreen restore; debounce avoids
+# blocking the UI thread with repeated PIL resizes (looks like the window "shrinks slowly").
+_PREVIEW_RESIZE_DEBOUNCE_MS = 200
+_PREVIEW_MAP_RETRY_MAX = 12
+_PREVIEW_CANVAS_PAD = 8
 
 
 def resolve_weights(raw: str, project_root: Path) -> Path:
@@ -105,8 +113,9 @@ class UploadViewerApp:
         self._image_after: Optional[np.ndarray] = None
 
         self._photo: Optional[ImageTk.PhotoImage] = None
-        self._preview_max_w = _PREVIEW_MAX_W
-        self._preview_max_h = _PREVIEW_MAX_H
+        self._preview_resize_after_id: Optional[str] = None
+        self._preview_map_retry_count: int = 0
+        self._preview_map_after_id: Optional[str] = None
 
         self._playing: bool = False
         self._play_after_id: Optional[str] = None
@@ -183,16 +192,90 @@ class UploadViewerApp:
         )
         self.chk_tracking.pack(side=tk.LEFT, padx=(12, 0))
 
-        preview_wrap = ttk.Frame(right, relief=tk.SUNKEN, borderwidth=1)
-        preview_wrap.pack(fill=tk.BOTH, expand=True)
-        self.preview_label = ttk.Label(preview_wrap, anchor=tk.CENTER, text="No file loaded")
-        self.preview_label.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        preview_wrap.bind("<Configure>", self._on_preview_configure)
+        self.preview_wrap = ttk.Frame(right, relief=tk.SUNKEN, borderwidth=1)
+        self.preview_wrap.pack(fill=tk.BOTH, expand=True)
+        # Canvas (not Label): image does not become the widget's minimum size, so fullscreen /
+        # restore does not fight the geometry manager with huge PhotoImages.
+        self.preview_canvas = tk.Canvas(
+            self.preview_wrap,
+            highlightthickness=0,
+            borderwidth=0,
+            background="#2e2e2e",
+        )
+        self.preview_canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.preview_canvas.bind("<Configure>", self._on_preview_configure)
 
     def _on_preview_configure(self, event: tk.Event) -> None:
-        # inner padding ~8
-        self._preview_max_w = max(320, event.width - 16)
-        self._preview_max_h = max(240, event.height - 16)
+        if str(getattr(event, "widget", "")) != str(self.preview_canvas):
+            return
+        # Ignore transient tiny sizes during WM transitions.
+        if event.width < 32 or event.height < 32:
+            return
+        # Real layout: allow mapped retries to use winfo from now on.
+        self._preview_map_retry_count = 0
+        if self._preview_resize_after_id is not None:
+            try:
+                self.root.after_cancel(self._preview_resize_after_id)
+            except tk.TclError:
+                pass
+        self._preview_resize_after_id = self.root.after(
+            _PREVIEW_RESIZE_DEBOUNCE_MS, self._finish_preview_resize
+        )
+
+    def _finish_preview_resize(self) -> None:
+        self._preview_resize_after_id = None
+        self._update_preview_image()
+
+    def _preview_display_bounds(self) -> Tuple[int, int]:
+        """Max width/height for the scaled PhotoImage (fits inside the canvas)."""
+        try:
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+        try:
+            pw = int(self.preview_canvas.winfo_width())
+            ph = int(self.preview_canvas.winfo_height())
+        except tk.TclError:
+            pw, ph = 1, 1
+        pad = 2 * _PREVIEW_CANVAS_PAD
+        if pw > pad + 1 and ph > pad + 1:
+            mw = max(160, pw - pad)
+            mh = max(120, ph - pad)
+        else:
+            mw, mh = _PREVIEW_FALLBACK_MAX_W, _PREVIEW_FALLBACK_MAX_H
+        mw = min(mw, _PREVIEW_ABSOLUTE_CAP_W)
+        mh = min(mh, _PREVIEW_ABSOLUTE_CAP_H)
+        return mw, mh
+
+    def _draw_canvas_placeholder(self, message: str) -> None:
+        self.preview_canvas.delete("all")
+        try:
+            w = max(2, int(self.preview_canvas.winfo_width()))
+            h = max(2, int(self.preview_canvas.winfo_height()))
+        except tk.TclError:
+            w, h = 400, 300
+        self.preview_canvas.create_text(
+            w // 2,
+            h // 2,
+            text=message,
+            fill="#b0b0b0",
+            width=max(80, w - 32),
+        )
+
+    def _cancel_preview_map_timer(self) -> None:
+        if self._preview_map_after_id is not None:
+            try:
+                self.root.after_cancel(self._preview_map_after_id)
+            except tk.TclError:
+                pass
+            self._preview_map_after_id = None
+
+    def _reset_preview_map_state(self) -> None:
+        self._cancel_preview_map_timer()
+        self._preview_map_retry_count = 0
+
+    def _retry_preview_after_map(self) -> None:
+        self._preview_map_after_id = None
         self._update_preview_image()
 
     def _on_add_files(self) -> None:
@@ -248,12 +331,19 @@ class UploadViewerApp:
         self.listbox.delete(0, tk.END)
         self.status_var.set("Queue cleared. Add files…")
         self._set_frame_buttons_state(False)
-        self.preview_label.configure(image="", text="No file loaded")
+        self._draw_canvas_placeholder("No file loaded")
         self._photo = None
         self.btn_play.configure(text="Play", state=tk.DISABLED)
         self.chk_tracking.configure(state=tk.DISABLED)
 
     def _on_close(self) -> None:
+        self._reset_preview_map_state()
+        if self._preview_resize_after_id is not None:
+            try:
+                self.root.after_cancel(self._preview_resize_after_id)
+            except tk.TclError:
+                pass
+            self._preview_resize_after_id = None
         self._release_video()
         self.root.destroy()
 
@@ -452,17 +542,44 @@ class UploadViewerApp:
     def _update_preview_image(self) -> None:
         bgr = self._current_display_bgr()
         if bgr is None:
-            if self.paths:
-                self.preview_label.configure(image="", text="Could not show frame")
+            self._reset_preview_map_state()
             self._photo = None
+            if self.paths:
+                self._draw_canvas_placeholder("Could not show frame")
+            else:
+                self._draw_canvas_placeholder("Add files…")
             return
         try:
-            self._photo = bgr_to_photo(bgr, self._preview_max_w, self._preview_max_h)
+            self.root.update_idletasks()
+            pw = int(self.preview_canvas.winfo_width())
+            ph = int(self.preview_canvas.winfo_height())
+        except tk.TclError:
+            pw, ph = 1, 1
+
+        if pw > 1 and ph > 1:
+            self._preview_map_retry_count = 0
+            max_w, max_h = self._preview_display_bounds()
+        else:
+            self._preview_map_retry_count += 1
+            if self._preview_map_retry_count > _PREVIEW_MAP_RETRY_MAX:
+                self._reset_preview_map_state()
+                max_w, max_h = _PREVIEW_FALLBACK_MAX_W, _PREVIEW_FALLBACK_MAX_H
+            else:
+                self._cancel_preview_map_timer()
+                self._preview_map_after_id = self.root.after(16, self._retry_preview_after_map)
+                return
+
+        try:
+            self._photo = bgr_to_photo(bgr, max_w, max_h)
         except Exception:
-            self.preview_label.configure(image="", text="Display error")
+            self._draw_canvas_placeholder("Display error")
             self._photo = None
             return
-        self.preview_label.configure(image=self._photo, text="")
+
+        self.preview_canvas.delete("all")
+        cx = max(1, pw // 2)
+        cy = max(1, ph // 2)
+        self.preview_canvas.create_image(cx, cy, image=self._photo, anchor=tk.CENTER)
 
     def _refresh_all(self) -> None:
         self._refresh_status()

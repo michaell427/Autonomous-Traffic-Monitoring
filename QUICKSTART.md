@@ -124,12 +124,14 @@ Optional smoke tests in the repo root (edit paths inside if your run name differ
 - `python quick_yolo_check.py`
 - `python visualize_yolo_predictions.py`
 - `python demo_before_after.py --weights yolov8n.pt --source bdd100k_yolo_format/val/images` — Space toggles before/after, **Left/Right** prev/next image (needs **`opencv-python`** with GUI, not headless). If GUI fails: `--save-dir outputs/demo_ba` writes JPEGs; or `pip uninstall opencv-python-headless -y` then `pip install opencv-python`
+- `python demo_upload_window.py --weights yolov8n.pt` — **Tk** window: queue images/videos, before/after, play/step frames, optional **Tracking IDs**; `--file path` can be repeated to pre-load. Headless OpenCV is OK; UI may be slow on long videos
 - `python app_upload_before_after.py --weights yolov8n.pt` — upload image/video in browser and see before/after (install Gradio first)
 
 ### 6. Next Steps (roadmap)
 
-- Segmentation model training (not wired in repo yet)
+- **Drivable / semantic segmentation** — full implementer spec: [docs/segmentation_drivable_handoff.md](docs/segmentation_drivable_handoff.md) (not wired in repo yet)
 - Deeper MOT (metrics, custom tracker configs, Re-ID) beyond Ultralytics `--track`
+- Faster interactive preview (threading / smaller resize / ONNX) for `demo_upload_window.py` if demos need it
 - Model optimization (quantization, TensorRT) and one **unified** det+seg+track pipeline
 
 See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the full plan.

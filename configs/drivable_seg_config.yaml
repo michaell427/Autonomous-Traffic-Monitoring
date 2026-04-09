@@ -1,0 +1,59 @@
+# Drivable-area semantic segmentation (BDD100K color_labels)
+# Paths are relative to root_dir unless absolute.
+
+paths:
+  root_dir: "."
+  images_dir: "bdd100k_images_100k/100k"
+  # BDD100K drivable PNGs: <stem>_drivable_color.png or <stem>.png under <split>/
+  drivable_masks_dir: "bdd100k_drivable_maps/color_labels"
+
+data:
+  train_split: "train"
+  val_split: "val"
+  image_size: [640, 640]  # [height, width]
+  batch_size: 16
+  num_workers: 4
+  # Cap dataset size for smoke tests (null = use all pairs)
+  max_train_samples: null
+  max_val_samples: null
+  # If color_labels/<val_split> is missing/empty, hold out this fraction of train pairs
+  val_holdout_from_train_fraction: 0.05
+  val_holdout_seed: 42
+
+classes:
+  # Matches bdd100k/bdd100k drivables trainIds: 0=direct, 1=alternative, 2=background
+  num_classes: 3
+  names: ["direct", "alternative", "background"]
+  ignore_index: 255
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.5
+  rotation: 15
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.1
+  blur: 0.1
+  noise: 0.05
+
+model:
+  backbone: deeplabv3_resnet50
+  pretrained: true
+
+training:
+  epochs: 10
+  lr: 0.0001
+  weight_decay: 0.0001
+  aux_loss_weight: 0.4
+  amp: true
+  log_interval: 50
+  early_stopping:
+    enabled: true
+    monitor: "val_loss"  # "val_loss" or "val_miou"
+    patience: 3
+    min_delta: 0.0005
+
+output:
+  project: "outputs/drivable_seg"
+  run_name: "bdd100k_drivable"

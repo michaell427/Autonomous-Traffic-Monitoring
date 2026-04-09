@@ -19,6 +19,7 @@ This project implements a production-ready traffic monitoring system that can:
 | YOLO validation / metrics | Implemented (`src/models/evaluate_yolo.py`); log runs in `docs/experiment_log.md` |
 | Image / video / webcam inference (detection) | Implemented (`src/inference.py`) |
 | Multi-object tracking on frame sequences | Implemented (`--track` on `src/inference.py`, ByteTrack by default; `src/tracking/` wrapper) |
+| Desktop demo (queue, before/after, play, optional track IDs) | Implemented (`demo_upload_window.py`, Tk + Canvas; `opencv-python-headless` OK for I/O) |
 | Upload UI (image/video before/after) | Implemented (`app_upload_before_after.py`, Gradio) |
 | Segmentation training, unified det+seg+track pipeline | Not in repo yet (planned) |
 
@@ -49,7 +50,9 @@ This project implements a production-ready traffic monitoring system that can:
 
 Add a `notebooks/` folder locally if you use Jupyter; it is not required by the scripts above.
 
-**How the pipeline fits together (data paths, two formats, train → eval → inference):** see [context.md](context.md).
+Large **local** downloads (e.g. **BDDA** / BDD-Attention video, full BDD100K trees) are listed in **`.gitignore`** so they are not committed by mistake; keep them on disk or track with **DVC** if you want versioned data.
+
+**How the pipeline fits together (data paths, two formats, train → eval → inference):** see [context.md](context.md) if you keep a local copy; **drivable segmentation (planned)** is specified for implementers in [docs/segmentation_drivable_handoff.md](docs/segmentation_drivable_handoff.md).
 
 ## Getting Started
 
@@ -167,6 +170,7 @@ python src/inference.py --weights yolov8n.pt --source clip.mp4 --track --tracker
 - `quick_yolo_check.py` — quick inference smoke test on a few val images
 - `visualize_yolo_predictions.py` — saves annotated images (edit weights path inside the script if needed)
 - `demo_before_after.py` — **Space** toggles raw vs detections, **arrow keys** prev/next image (**Q** quit); needs **`opencv-python`** with GUI (not `opencv-python-headless`). If windows fail, use `--save-dir outputs/...` to write before/after/pair JPEGs instead
+- `demo_upload_window.py` — **Tk** app: add multiple images/videos, before/after, frame/media navigation, **Play/Pause**, optional **Tracking IDs** (`--tracker`); preview is **not real-time** on weak CPUs—fine for demos
 - `app_upload_before_after.py` — local upload app (image/video) with before/after preview in the browser; install `gradio` first (`pip install -r requirements-webui.txt`)
 
 ### Not available yet
@@ -188,6 +192,7 @@ python src/inference.py --weights yolov8n.pt --source clip.mp4 --track --tracker
 - [ ] Segmentation training integrated in repo
 - [x] Multi-object tracking on video / webcam / image folders (`src/inference.py --track`; `src/tracking.run_tracking`)
 - [x] Before/after toggle demo (`demo_before_after.py`; OpenCV, local display only)
+- [x] Desktop upload / before-after / optional tracking demo (`demo_upload_window.py`; Tk)
 - [x] Upload before/after UI (`app_upload_before_after.py`; Gradio)
 - [x] Detection inference CLI (`src/inference.py` — image, video, webcam)
 - [ ] Deployment / optimization pass
