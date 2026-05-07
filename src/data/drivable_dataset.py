@@ -1,9 +1,12 @@
 """BDD100K drivable-area dataset: RGB images + color PNG masks → class indices.
 
-Official label colors (RGB) are defined in bdd100k/bdd100k ``label/label.py`` (``drivables``).
-PNG files under ``color_labels/{split}/`` are read with OpenCV (BGR). BDD100K releases often
-name masks ``<image_stem>_drivable_color.png`` (we also accept plain ``<image_stem>.png``).
-Unknown pixels map to ``ignore_index`` (default 255) for cross-entropy.
+BGR tuples below match ``cv2.imread`` output. BDD100K ``color_labels`` PNGs use **either**
+the palette from ``label/label.py`` (drivables) **or** saturated primaries on some releases:
+
+- ``(86, 94, 219)`` / ``(219, 211, 86)`` — official-style direct / alternative
+- ``(0, 0, 255)`` / ``(255, 0, 0)`` — blue / red BGR (common alternate encoding)
+
+Unknown colors map to ``ignore_index`` (default 255) for cross-entropy.
 """
 
 from __future__ import annotations
@@ -19,10 +22,12 @@ from torch.utils.data import Dataset
 
 from src.data.augmentation import get_segmentation_augmentation
 
-# BGR tuples as returned by cv2.imread; corresponds to RGB in bdd100k label.py drivables
+# BGR tuples as returned by cv2.imread (multiple BDD100K drivable PNG encodings).
 DRIVABLE_BGR_TO_CLASS: Dict[Tuple[int, int, int], int] = {
-    (86, 94, 219): 0,  # direct   — RGB (219, 94, 86)
-    (219, 211, 86): 1,  # alternative — RGB (86, 211, 219)
+    (86, 94, 219): 0,  # direct (label.py style)
+    (219, 211, 86): 1,  # alternative (label.py style)
+    (0, 0, 255): 0,  # direct (primary-color release, BGR “blue”)
+    (255, 0, 0): 1,  # alternative (primary-color release, BGR “red”)
     (0, 0, 0): 2,  # background
 }
 
@@ -211,15 +216,18 @@ def build_drivable_dataloaders(
             hue=aug_cfg.get("hue", 0.1),
             blur=aug_cfg.get("blur", 0.1),
             noise=aug_cfg.get("noise", 0.05),
+            pad_mask_value=ignore_index,
         )
         val_tf = get_segmentation_augmentation(
             image_size=image_size,
             training=False,
+            pad_mask_value=ignore_index,
         )
     else:
         val_tf = get_segmentation_augmentation(
             image_size=image_size,
             training=False,
+            pad_mask_value=ignore_index,
         )
         train_tf = val_tf
 

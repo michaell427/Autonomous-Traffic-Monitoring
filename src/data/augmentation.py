@@ -6,6 +6,28 @@ from albumentations.pytorch import ToTensorV2
 from typing import Optional, Tuple
 
 
+def drivable_letterbox_params(
+    orig_h: int,
+    orig_w: int,
+    image_size: Tuple[int, int],
+) -> Tuple[int, int, int, int]:
+    """Geometry for val/test preprocessing: LongestMaxSize + center PadIfNeeded.
+
+    Matches ``get_segmentation_augmentation(..., training=False)`` before
+    normalize/totensor. Returns ``(new_h, new_w, pad_top, pad_left)`` after
+    resize (before padding); padding is split evenly (remainder to bottom/right).
+    """
+    max_side = max(image_size)
+    scale = max_side / max(orig_h, orig_w)
+    new_h = int(round(orig_h * scale))
+    new_w = int(round(orig_w * scale))
+    pad_h = image_size[0] - new_h
+    pad_w = image_size[1] - new_w
+    pad_top = pad_h // 2
+    pad_left = pad_w // 2
+    return new_h, new_w, pad_top, pad_left
+
+
 def get_detection_augmentation(
     image_size: Tuple[int, int] = (640, 640),
     training: bool = True,
@@ -98,7 +120,8 @@ def get_segmentation_augmentation(
     saturation: float = 0.2,
     hue: float = 0.1,
     blur: float = 0.1,
-    noise: float = 0.05
+    noise: float = 0.05,
+    pad_mask_value: float = 0,
 ) -> A.Compose:
     """Get augmentation pipeline for segmentation task.
     
@@ -113,6 +136,8 @@ def get_segmentation_augmentation(
         hue: Hue variation range
         blur: Probability of applying blur
         noise: Probability of adding noise
+        pad_mask_value: ``fill_mask`` for ``PadIfNeeded`` (use ``ignore_index``, e.g. 255,
+            so letterbox padding is not labeled as class 0).
         
     Returns:
         Albumentations compose transform
@@ -123,7 +148,8 @@ def get_segmentation_augmentation(
             A.PadIfNeeded(
                 min_height=image_size[0],
                 min_width=image_size[1],
-                border_mode=cv2.BORDER_CONSTANT
+                border_mode=cv2.BORDER_CONSTANT,
+                fill_mask=pad_mask_value,
             ),
             A.HorizontalFlip(p=horizontal_flip),
             A.Rotate(limit=rotation, p=0.5),
@@ -154,7 +180,8 @@ def get_segmentation_augmentation(
             A.PadIfNeeded(
                 min_height=image_size[0],
                 min_width=image_size[1],
-                border_mode=cv2.BORDER_CONSTANT
+                border_mode=cv2.BORDER_CONSTANT,
+                fill_mask=pad_mask_value,
             ),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2()

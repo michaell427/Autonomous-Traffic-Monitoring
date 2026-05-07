@@ -4,12 +4,16 @@ Run from project root (venv active):
 
   python demo_upload_window.py --weights yolov8n.pt
 
+Loads drivable segmentation by default from ``outputs/drivable_seg/bdd100k_drivable/best.pth``
+(if present). Use ``--no-drivable`` to skip, or ``--drivable-weights PATH`` to override.
+
 - **Add files…** — pick multiple images/videos (you can add again anytime).
 - **List** — click a row to jump to that item.
 - **◀ media / media ▶** — previous / next file in the queue.
 - **◀ frame / frame ▶** — previous / next frame (videos only).
 - **Play / Pause** — auto-advance frames at the clip’s FPS (before or after view; **Space** still toggles).
 - **Tracking IDs** — optional video mode for persistent IDs (ByteTrack/BoT-SORT).
+- **Drivable overlay** — toggle anytime; model loads by default from the standard ``best.pth`` (see above).
 - **Before / After** — toggle original vs YOLO overlay (or **Space**).
 
 Keyboard: **Space** = before/after; **P** = play/pause (video); **← / →** = frame (video); **[** / **]** = prev/next media.
@@ -33,14 +37,21 @@ from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import torch
 from PIL import Image, ImageTk
 from ultralytics import YOLO
 
 from demo_before_after import IMAGE_EXTS, annotate_frame
+from src.data.drivable_dataset import DRIVABLE_BGR_TO_CLASS
+from src.inference_drivable import predict_mask
+from src.models.train_drivable_seg import _build_deeplabv3
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 _MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
 _MAX_VIDEO_CACHE_FRAMES = 120
+
+# Default drivable checkpoint (matches configs/drivable_seg_config.yaml output layout).
+_DEFAULT_DRIVABLE_WEIGHTS = "outputs/drivable_seg/bdd100k_drivable/best.pth"
 
 # Fallback bounds when the canvas is not mapped yet (avoid oversized PhotoImage).
 _PREVIEW_FALLBACK_MAX_W = 512
@@ -52,6 +63,52 @@ _PREVIEW_ABSOLUTE_CAP_H = 1200
 _PREVIEW_RESIZE_DEBOUNCE_MS = 200
 _PREVIEW_MAP_RETRY_MAX = 12
 _PREVIEW_CANVAS_PAD = 8
+
+
+class DrivableOverlay:
+    def __init__(self, weights_path: Path, alpha: float, device: Optional[str] = None) -> None:
+        self.weights_path = weights_path
+        self.alpha = float(max(0.0, min(1.0, alpha)))
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+        try:
+            ckpt = torch.load(str(weights_path), map_location=self.device, weights_only=False)
+        except TypeError:
+            ckpt = torch.load(str(weights_path), map_location=self.device)
+        cfg = ckpt["config"]
+        self.image_size = tuple(cfg["image_size"])
+        self.num_classes = int(cfg["num_classes"])
+
+        self.model = _build_deeplabv3(self.num_classes, pretrained=False)
+        state = ckpt["model_state"]
+        try:
+            self.model.load_state_dict(state)
+        except RuntimeError as ex:
+            # Checkpoints saved from training may include aux head weights.
+            # Allow loading into inference-time models without aux_classifier.
+            msg = str(ex)
+            if "Unexpected key(s) in state_dict" in msg and "aux_classifier" in msg:
+                self.model.load_state_dict(state, strict=False)
+            else:
+                raise
+        self.model.to(self.device)
+        self.model.eval()
+
+        self.palette = np.zeros((max(self.num_classes, 3), 3), dtype=np.uint8)
+        for bgr, cls in DRIVABLE_BGR_TO_CLASS.items():
+            if cls < self.num_classes:
+                self.palette[cls] = np.array(bgr, dtype=np.uint8)
+
+    @torch.no_grad()
+    def _predict_mask(self, bgr: np.ndarray) -> np.ndarray:
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        return predict_mask(self.model, rgb, self.image_size, self.device)
+
+    def overlay(self, bgr: np.ndarray) -> np.ndarray:
+        mask = self._predict_mask(bgr)
+        color = self.palette[mask]
+        blend = (self.alpha * color.astype(np.float32) + (1 - self.alpha) * bgr.astype(np.float32))
+        return np.clip(blend, 0, 255).astype(np.uint8)
 
 
 def resolve_weights(raw: str, project_root: Path) -> Path:
@@ -86,6 +143,7 @@ class UploadViewerApp:
         root: tk.Tk,
         model: YOLO,
         weights_path: Path,
+        drivable_overlay: Optional[DrivableOverlay],
         tracker: str,
         conf: float,
         imgsz: int,
@@ -94,6 +152,7 @@ class UploadViewerApp:
         self.root = root
         self.model = model
         self.weights_path = weights_path
+        self.drivable_overlay = drivable_overlay
         self.tracker = tracker
         self.conf = conf
         self.imgsz = imgsz
@@ -106,11 +165,13 @@ class UploadViewerApp:
         self._video_n_frames: int = 0
         self._video_cache: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
         self._video_track_cache: Dict[int, np.ndarray] = {}
+        self._video_drivable_cache: Dict[Tuple[int, bool, bool], np.ndarray] = {}
         self._track_ready_upto: int = -1
         self._track_model: Optional[YOLO] = None
 
         self._image_before: Optional[np.ndarray] = None
         self._image_after: Optional[np.ndarray] = None
+        self._image_after_drivable: Optional[np.ndarray] = None
 
         self._photo: Optional[ImageTk.PhotoImage] = None
         self._preview_resize_after_id: Optional[str] = None
@@ -121,6 +182,7 @@ class UploadViewerApp:
         self._play_after_id: Optional[str] = None
         self._video_fps: float = 24.0
         self.use_tracking_ids = tk.BooleanVar(value=False)
+        self.use_drivable_overlay = tk.BooleanVar(value=False)
 
         root.title("Traffic — upload & before/after")
         root.minsize(720, 560)
@@ -191,6 +253,13 @@ class UploadViewerApp:
             command=self._on_toggle_tracking_ids,
         )
         self.chk_tracking.pack(side=tk.LEFT, padx=(12, 0))
+        self.chk_drivable = ttk.Checkbutton(
+            ctrl,
+            text="Drivable overlay",
+            variable=self.use_drivable_overlay,
+            command=self._on_toggle_drivable_overlay,
+        )
+        self.chk_drivable.pack(side=tk.LEFT, padx=(12, 0))
 
         self.preview_wrap = ttk.Frame(right, relief=tk.SUNKEN, borderwidth=1)
         self.preview_wrap.pack(fill=tk.BOTH, expand=True)
@@ -383,6 +452,7 @@ class UploadViewerApp:
             self._cap = None
         self._video_cache.clear()
         self._reset_tracking_state()
+        self._video_drivable_cache.clear()
         self._video_n_frames = 0
 
     def _reset_tracking_state(self) -> None:
@@ -393,6 +463,7 @@ class UploadViewerApp:
     def _load_current_media(self) -> None:
         self._release_video()
         self._image_before = self._image_after = None
+        self._image_after_drivable = None
         self.show_before = True
         self.video_frame_index = 0
 
@@ -433,6 +504,7 @@ class UploadViewerApp:
                     after = cv2.resize(after, (bgr.shape[1], bgr.shape[0]))
                 self._image_before = bgr
                 self._image_after = after
+                self._image_after_drivable = None
         except Exception as ex:  # noqa: BLE001
             self.status_var.set(f"Error loading {path.name}: {ex}")
             return
@@ -465,6 +537,23 @@ class UploadViewerApp:
             del self._video_cache[min(self._video_cache.keys())]
         self._video_cache[frame_index] = (frame, after)
         return frame, after
+
+    def _ensure_video_drivable_overlay(
+        self, frame_index: int, base_after: np.ndarray, tracked: bool
+    ) -> Optional[np.ndarray]:
+        if self.drivable_overlay is None:
+            return None
+        key = (frame_index, tracked, self.show_before)
+        if key in self._video_drivable_cache:
+            return self._video_drivable_cache[key]
+        try:
+            over = self.drivable_overlay.overlay(base_after)
+        except Exception:
+            return base_after
+        if len(self._video_drivable_cache) >= _MAX_VIDEO_CACHE_FRAMES:
+            del self._video_drivable_cache[min(self._video_drivable_cache.keys())]
+        self._video_drivable_cache[key] = over
+        return over
 
     def _get_track_model(self) -> YOLO:
         if self._track_model is None:
@@ -511,14 +600,38 @@ class UploadViewerApp:
             if before is None or det_after is None:
                 return None
             if self.show_before:
-                return before
-            if self.use_tracking_ids.get():
+                out = before
+                is_tracked = False
+            elif self.use_tracking_ids.get():
                 tracked_after = self._ensure_video_tracked(self.video_frame_index)
-                return tracked_after if tracked_after is not None else det_after
-            return det_after
+                out = tracked_after if tracked_after is not None else det_after
+                is_tracked = tracked_after is not None
+            else:
+                out = det_after
+                is_tracked = False
+            if self.use_drivable_overlay.get() and self.drivable_overlay is not None:
+                over = self._ensure_video_drivable_overlay(
+                    self.video_frame_index, out, tracked=is_tracked
+                )
+                return over if over is not None else out
+            return out
         if self._image_before is None or self._image_after is None:
             return None
-        return self._image_before if self.show_before else self._image_after
+        if self.show_before:
+            if self.use_drivable_overlay.get() and self.drivable_overlay is not None:
+                try:
+                    return self.drivable_overlay.overlay(self._image_before)
+                except Exception:
+                    return self._image_before
+            return self._image_before
+        if self.use_drivable_overlay.get() and self.drivable_overlay is not None:
+            if self._image_after_drivable is None:
+                try:
+                    self._image_after_drivable = self.drivable_overlay.overlay(self._image_after)
+                except Exception:
+                    self._image_after_drivable = self._image_after
+            return self._image_after_drivable
+        return self._image_after
 
     def _refresh_status(self) -> None:
         if not self.paths:
@@ -532,12 +645,14 @@ class UploadViewerApp:
             fr = self.video_frame_index + 1
             mode = "BEFORE" if self.show_before else "AFTER"
             tracking_tag = " | TRACK" if self.use_tracking_ids.get() else ""
+            drivable_tag = self._drivable_status_tag()
             self.status_var.set(
-                f"{mode}{tracking_tag}  |  {path.name}  |  media {pos}/{n}  |  frame {fr}/{total}"
+                f"{mode}{tracking_tag}{drivable_tag}  |  {path.name}  |  media {pos}/{n}  |  frame {fr}/{total}"
             )
         else:
             mode = "BEFORE" if self.show_before else "AFTER"
-            self.status_var.set(f"{mode}  |  {path.name}  |  media {pos}/{n}")
+            drivable_tag = self._drivable_status_tag()
+            self.status_var.set(f"{mode}{drivable_tag}  |  {path.name}  |  media {pos}/{n}")
 
     def _update_preview_image(self) -> None:
         bgr = self._current_display_bgr()
@@ -601,6 +716,19 @@ class UploadViewerApp:
             return
         self._stop_playback()
         self._reset_tracking_state()
+        self._video_drivable_cache.clear()
+        self._refresh_all()
+
+    def _drivable_status_tag(self) -> str:
+        if not self.use_drivable_overlay.get():
+            return ""
+        if self.drivable_overlay is None:
+            return " | DRIVABLE (no weights — use --drivable-weights)"
+        return " | DRIVABLE"
+
+    def _on_toggle_drivable_overlay(self) -> None:
+        self._image_after_drivable = None
+        self._video_drivable_cache.clear()
         self._refresh_all()
 
     def _toggle_play(self) -> None:
@@ -700,6 +828,32 @@ def main() -> None:
     parser.add_argument("--conf", type=float, default=0.25)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--tracker", type=str, default="bytetrack.yaml")
+    parser.add_argument(
+        "--drivable-weights",
+        type=str,
+        default=_DEFAULT_DRIVABLE_WEIGHTS,
+        help=(
+            "Drivable checkpoint .pth (default: %(default)s). "
+            "If missing, overlay stays disabled until you train or pass another path."
+        ),
+    )
+    parser.add_argument(
+        "--no-drivable",
+        action="store_true",
+        help="Do not load drivable segmentation (faster startup, overlay toggle has no effect).",
+    )
+    parser.add_argument(
+        "--drivable-alpha",
+        type=float,
+        default=0.35,
+        help="Overlay alpha for drivable mask (0..1)",
+    )
+    parser.add_argument(
+        "--drivable-device",
+        type=str,
+        default=None,
+        help="Optional device for drivable model (e.g. cuda, cpu)",
+    )
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
@@ -716,12 +870,33 @@ def main() -> None:
 
     print("Loading model…")
     model = YOLO(str(weights))
+    drivable_overlay: Optional[DrivableOverlay] = None
+    if not args.no_drivable and args.drivable_weights:
+        try:
+            drivable_weights = resolve_weights(args.drivable_weights, project_root)
+        except FileNotFoundError:
+            print(
+                f"Drivable weights not found ({args.drivable_weights!r}); "
+                "train drivable seg or pass --drivable-weights. Overlay disabled.",
+                file=sys.stderr,
+            )
+        else:
+            print("Loading drivable model…")
+            try:
+                drivable_overlay = DrivableOverlay(
+                    drivable_weights,
+                    alpha=args.drivable_alpha,
+                    device=args.drivable_device,
+                )
+            except Exception as ex:
+                print(f"Failed to load drivable model: {ex}", file=sys.stderr)
 
     root = tk.Tk()
     app = UploadViewerApp(
         root,
         model,
         weights,
+        drivable_overlay,
         args.tracker,
         args.conf,
         args.imgsz,

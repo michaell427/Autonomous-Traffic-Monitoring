@@ -1,4 +1,10 @@
-"""Run drivable segmentation on images or folders; save class-ID PNGs and optional color overlay."""
+"""Run drivable segmentation on images or folders; save masks and optional overlay.
+
+Writes a BDD-style colored ``*_mask.png`` (easy to compare to GT color_labels).
+Also writes ``*_mask_ids.png`` with raw class indices 0/1/2 (looks nearly black
+in viewers — use for programmatic use). Predictions are mapped back to the
+original resolution by inverting the same letterbox padding used in training.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +24,7 @@ import torch.nn as nn
 from PIL import Image
 from tqdm import tqdm
 
-from src.data.augmentation import get_segmentation_augmentation
+from src.data.augmentation import drivable_letterbox_params, get_segmentation_augmentation
 from src.data.drivable_dataset import DRIVABLE_BGR_TO_CLASS
 from src.models.train_drivable_seg import _build_deeplabv3
 
@@ -39,20 +45,19 @@ def predict_mask(
     image_size: Tuple[int, int],
     device: torch.device,
 ) -> np.ndarray:
+    """Class map H×W aligned with ``image_rgb`` (inverse of letterbox val transform)."""
+    h, w = image_rgb.shape[:2]
+    new_h, new_w, pad_top, pad_left = drivable_letterbox_params(h, w, image_size)
+
     tf = get_segmentation_augmentation(image_size=image_size, training=False)
     t = tf(image=image_rgb)
     batch = t["image"].unsqueeze(0).to(device)
     out = model(batch)
     logits = out["out"] if isinstance(out, dict) else out
     logits = logits[0].cpu()
-    h, w = image_rgb.shape[:2]
-    up = torch.nn.functional.interpolate(
-        logits.unsqueeze(0).float(),
-        size=(h, w),
-        mode="bilinear",
-        align_corners=False,
-    )[0]
-    return up.argmax(dim=0).numpy().astype(np.uint8)
+    pred_sq = logits.argmax(dim=0).numpy().astype(np.uint8)
+    cropped = pred_sq[pad_top : pad_top + new_h, pad_left : pad_left + new_w]
+    return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_NEAREST)
 
 
 def main() -> None:
@@ -91,7 +96,15 @@ def main() -> None:
     image_size = tuple(cfg["image_size"])
 
     model = _build_deeplabv3(num_classes, pretrained=False)
-    model.load_state_dict(ckpt["model_state"])
+    state = ckpt["model_state"]
+    try:
+        model.load_state_dict(state)
+    except RuntimeError as ex:
+        msg = str(ex)
+        if "Unexpected key(s) in state_dict" in msg and "aux_classifier" in msg:
+            model.load_state_dict(state, strict=False)
+        else:
+            raise
     model.to(device)
     model.eval()
 
@@ -109,12 +122,12 @@ def main() -> None:
         im = Image.open(p).convert("RGB")
         rgb = np.array(im)
         mask = predict_mask(model, rgb, image_size, device)
-        mask_path = out_root / f"{p.stem}_mask.png"
-        cv2.imwrite(str(mask_path), mask)
+        color = palette[mask]
+        cv2.imwrite(str(out_root / f"{p.stem}_mask.png"), color)
+        cv2.imwrite(str(out_root / f"{p.stem}_mask_ids.png"), mask)
 
         if args.overlay:
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            color = palette[mask]
             blend = (args.alpha * color.astype(np.float32) + (1 - args.alpha) * bgr.astype(np.float32))
             blend = np.clip(blend, 0, 255).astype(np.uint8)
             cv2.imwrite(str(out_root / f"{p.stem}_overlay.png"), blend)

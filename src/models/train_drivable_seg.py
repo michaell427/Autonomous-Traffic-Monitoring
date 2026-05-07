@@ -56,6 +56,7 @@ def _accumulate_iou(
     ignore_index: int,
     inter: torch.Tensor,
     union: torch.Tensor,
+    gt_pixels: torch.Tensor,
 ) -> None:
     pred = logits.argmax(dim=1)
     valid = target != ignore_index
@@ -66,13 +67,24 @@ def _accumulate_iou(
         tc = tgt == c
         inter[c] += (pc & tc).sum().item()
         union[c] += (pc | tc).sum().item()
+        gt_pixels[c] += tc.sum().item()
 
 
-def _miou_from_counts(inter: torch.Tensor, union: torch.Tensor) -> Tuple[float, torch.Tensor]:
+def _miou_from_counts(
+    inter: torch.Tensor,
+    union: torch.Tensor,
+    gt_pixels: torch.Tensor,
+    num_classes: int,
+) -> Tuple[float, torch.Tensor]:
+    """mIoU = mean of per-class IoU over classes that appear in GT (standard semantic seg).
+
+    Averaging only over ``union > 0`` is misleading: a single dominant class (e.g. background)
+    can yield mIoU≈1.0 even when other classes are never predicted correctly.
+    """
     iou = inter / (union + 1e-6)
-    valid = union > 0
-    if valid.any():
-        m = iou[valid].mean().item()
+    present = gt_pixels > 0
+    if present.any():
+        m = iou[present].mean().item()
     else:
         m = 0.0
     return m, iou
@@ -150,25 +162,28 @@ def validate(
     device: torch.device,
     num_classes: int,
     ignore_index: int,
-) -> Tuple[float, float, torch.Tensor]:
+    progress: bool = False,
+) -> Tuple[float, float, torch.Tensor, torch.Tensor]:
     model.eval()
     criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
     loss_sum = 0.0
     n_batches = 0
     inter = torch.zeros(num_classes)
     union = torch.zeros(num_classes)
+    gt_pixels = torch.zeros(num_classes)
 
-    for batch in loader:
+    it = tqdm(loader, desc="val", leave=True) if progress else loader
+    for batch in it:
         images = batch["image"].to(device, non_blocking=True)
         masks = batch["mask"].to(device, non_blocking=True)
         out = model(images)
         logits = out["out"] if isinstance(out, dict) else out
         loss_sum += criterion(logits, masks).item()
         n_batches += 1
-        _accumulate_iou(logits, masks, num_classes, ignore_index, inter, union)
+        _accumulate_iou(logits, masks, num_classes, ignore_index, inter, union, gt_pixels)
 
-    miou, per_iou = _miou_from_counts(inter, union)
-    return loss_sum / max(n_batches, 1), miou, per_iou
+    miou, per_iou = _miou_from_counts(inter, union, gt_pixels, num_classes)
+    return loss_sum / max(n_batches, 1), miou, per_iou, gt_pixels
 
 
 def _append_experiment_log(
@@ -300,7 +315,7 @@ def main() -> None:
         )
         train_secs = time.perf_counter() - t_train
         t_val = time.perf_counter()
-        va_loss, miou, per_iou = validate(
+        va_loss, miou, per_iou, gt_px = validate(
             model,
             val_loader,
             device,
@@ -319,6 +334,16 @@ def main() -> None:
             "  per-class IoU: "
             + ", ".join(f"{classes_cfg['names'][i]}={per_iou[i]:.4f}" for i in range(num_classes))
         )
+        tqdm.write(
+            "  val GT pixels (all val batches): "
+            + ", ".join(f"{classes_cfg['names'][i]}={int(gt_px[i])}" for i in range(num_classes))
+        )
+        n_present = int((gt_px > 0).sum().item())
+        if n_present < num_classes:
+            tqdm.write(
+                f"  note: {n_present}/{num_classes} classes appear in val GT "
+                "(mIoU averages only over those; a single-class val can inflate scores)."
+            )
 
         if miou > best_miou:
             best_miou = miou

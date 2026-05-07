@@ -1,13 +1,13 @@
 # Autonomous Traffic Monitoring & Analysis
 
-A comprehensive computer vision system for real-time traffic monitoring that combines object detection, instance segmentation, and multi-object tracking.
+A comprehensive computer vision system for real-time traffic monitoring that combines object detection, **semantic drivable-area segmentation**, and multi-object tracking. Instance segmentation (e.g., per-lane masks) remains a future extension.
 
 ## Project Overview
 
 This project implements a production-ready traffic monitoring system that can:
 - **Detect** vehicles (cars, trucks, buses, motorcycles) and pedestrians in traffic scenes
-- **Segment** road lanes, sidewalks, crosswalks, and infrastructure
-- **Track** objects across video frames with consistent IDs
+- **Segment** BDD100K **drivable area** (direct / alternative / background) at the pixel level
+- **Track** objects across video frames with consistent IDs (via Ultralytics + ByteTrack / BoT-SORT)
 
 ## What is implemented today
 
@@ -21,25 +21,28 @@ This project implements a production-ready traffic monitoring system that can:
 | Multi-object tracking on frame sequences | Implemented (`--track` on `src/inference.py`, ByteTrack by default; `src/tracking/` wrapper) |
 | Desktop demo (queue, before/after, play, optional track IDs) | Implemented (`demo_upload_window.py`, Tk + Canvas; `opencv-python-headless` OK for I/O) |
 | Upload UI (image/video before/after) | Implemented (`app_upload_before_after.py`, Gradio) |
-| Segmentation training, unified det+seg+track pipeline | Not in repo yet (planned) |
+| Drivable semantic segmentation (BDD100K color masks) | Implemented (`src/models/train_drivable_seg.py`, `evaluate_drivable_seg.py`, `src/inference_drivable.py`, `src/data/drivable_dataset.py`, `configs/drivable_seg_config.yaml`) |
+| Instance segmentation (lanes/infrastructure per instance), unified det+seg+track pipeline | Not wired as one product yet (planned) |
 
 ## Architecture (target)
 
 1. **Object Detection** — YOLOv8 / Ultralytics (primary path in this repo)
-2. **Instance Segmentation** — Mask R-CNN or YOLO-seg (planned)
-3. **Multi-Object Tracking** — ByteTrack / BoT-SORT via Ultralytics on video, webcam, or ordered image folders (`--track`)
+2. **Semantic drivable segmentation** — DeepLabV3–ResNet50 (`torchvision`) on BDD100K `color_labels` PNGs
+3. **Instance Segmentation** — Mask R-CNN or YOLO-seg (planned)
+4. **Multi-Object Tracking** — ByteTrack / BoT-SORT via Ultralytics on video, webcam, or ordered image folders (`--track`)
 
 ## Project Structure
 
 ```
 .
 +-- src/
-|   +-- data/           # Loaders, preprocess, dataset fixes, EDA helpers
-|   +-- models/         # train_yolo, train_detection, evaluate_yolo
+|   +-- data/           # Loaders, preprocess, dataset fixes, EDA helpers, drivable_dataset
+|   +-- models/         # train_yolo, train_detection, evaluate_yolo, train/eval drivable seg
 |   +-- inference.py    # detection + optional `--track` (ByteTrack / BoT-SORT)
+|   +-- inference_drivable.py  # drivable segmentation on images / folders
 |   +-- tracking/       # `run_tracking()` helper → same as inference --track
 |   +-- utils/          # Config loading, shared utilities
-+-- configs/            # data_config.yaml, detection_config.yaml
++-- configs/            # data_config.yaml, detection_config.yaml, drivable_seg_config.yaml
 +-- bdd100k_yolo_format/# YOLO layout + dataset.yaml for Ultralytics
 +-- outputs/            # Training runs (e.g. outputs/yolo_training/), reports
 +-- docs/               # EDA notes and templates
@@ -52,7 +55,7 @@ Add a `notebooks/` folder locally if you use Jupyter; it is not required by the 
 
 Large **local** downloads (e.g. **BDDA** / BDD-Attention video, full BDD100K trees) are listed in **`.gitignore`** so they are not committed by mistake; keep them on disk or track with **DVC** if you want versioned data.
 
-**How the pipeline fits together (data paths, two formats, train → eval → inference):** see [context.md](context.md) if you keep a local copy; **drivable segmentation (planned)** is specified for implementers in [docs/segmentation_drivable_handoff.md](docs/segmentation_drivable_handoff.md).
+**How the pipeline fits together (data paths, JSON vs YOLO layout, train → eval → inference):** see [context.md](context.md) if you keep a local copy. Extended drivable-segmentation notes may live in [docs/segmentation_drivable_handoff.md](docs/segmentation_drivable_handoff.md) if present; the training/inference code paths are under `src/` and `configs/drivable_seg_config.yaml`.
 
 ## Getting Started
 
@@ -103,7 +106,8 @@ bdd100k_labels/
 bdd100k_drivable_maps/
   color_labels/
     train/
-bdd100k_seg_maps/       # optional, for segmentation experiments
+    val/
+bdd100k_seg_maps/
 ```
 
 For **Ultralytics YOLO** training, you also need the prepared layout under `bdd100k_yolo_format/` (see `bdd100k_yolo_format/dataset.yaml`). Use the scripts under `src/data/` (for example `prepare_dataset.py`, `fix_yolo_*`) if you need to regenerate or repair that tree.
@@ -138,10 +142,34 @@ python src/models/train_yolo.py --model n --epochs 100 --batch 16 --project outp
 python src/models/train_detection.py --config configs/detection_config.yaml
 ```
 
-### Evaluate a checkpoint
+### Evaluate a detection checkpoint
 
 ```bash
 python src/models/evaluate_yolo.py --model path/to/best.pt --dataset bdd100k_yolo_format/dataset.yaml --split val
+```
+
+### Train drivable semantic segmentation (BDD100K)
+
+Requires RGB frames under `bdd100k_images_100k/100k/<split>/` and matching **color** PNG masks under `bdd100k_drivable_maps/color_labels/<split>/` (see `configs/drivable_seg_config.yaml`). Paths are validated against the config when you run training.
+
+```bash
+python src/models/train_drivable_seg.py --config configs/drivable_seg_config.yaml
+# Optional overrides: --epochs, --batch, --lr, --device cuda, --project, --name
+```
+
+### Evaluate a drivable segmentation checkpoint
+
+```bash
+python src/models/evaluate_drivable_seg.py --config configs/drivable_seg_config.yaml --weights path/to/best.pth --device cuda
+```
+
+### Run drivable inference (images or folder of images)
+
+Checkpoints are `.pth` from `train_drivable_seg` (they embed `image_size` and `num_classes` for the script).
+
+```bash
+python src/inference_drivable.py --weights outputs/drivable_seg/<run>/best.pth --source path/to/image.jpg --name my_run
+python src/inference_drivable.py --weights outputs/drivable_seg/<run>/best.pth --source bdd100k_images_100k/100k/val --overlay
 ```
 
 ### Run inference (image, video, or webcam)
@@ -175,7 +203,8 @@ python src/inference.py --weights yolov8n.pt --source clip.mp4 --track --tracker
 
 ### Not available yet
 
-- End-to-end **segmentation** training (`train_segmentation.py`, `segmentation_config.yaml`) and a single **unified** det+seg+track pipeline are **not** wired up yet. See `PROJECT_ROADMAP.md`.
+- A single **unified** det + drivable-seg + track **product** pipeline (one command / one runtime graph) is **not** wired up yet; detection/tracking and drivable segmentation are separate entry points today.
+- Broader **instance segmentation** (Mask R-CNN / YOLO-seg) for lanes and objects as instances is **not** integrated. See `PROJECT_ROADMAP.md`.
 
 ## Performance Targets
 
@@ -189,7 +218,7 @@ python src/inference.py --weights yolov8n.pt --source clip.mp4 --track --tracker
 - [x] Project structure and configs
 - [x] Data pipeline (BDD100K loaders, preprocess CLI, augmentation)
 - [x] YOLO-format dataset + Ultralytics train / eval scripts
-- [ ] Segmentation training integrated in repo
+- [x] Drivable semantic segmentation (DeepLabV3, train / eval / `inference_drivable.py`)
 - [x] Multi-object tracking on video / webcam / image folders (`src/inference.py --track`; `src/tracking.run_tracking`)
 - [x] Before/after toggle demo (`demo_before_after.py`; OpenCV, local display only)
 - [x] Desktop upload / before-after / optional tracking demo (`demo_upload_window.py`; Tk)
@@ -198,15 +227,3 @@ python src/inference.py --weights yolov8n.pt --source clip.mp4 --track --tracker
 - [ ] Deployment / optimization pass
 
 For a step-by-step plan, see [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md). For commands in order, see [QUICKSTART.md](QUICKSTART.md).
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-[Add contribution guidelines if applicable]
-
-## Contact
-
-[Add contact information if desired]
