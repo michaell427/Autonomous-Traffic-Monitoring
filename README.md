@@ -9,6 +9,23 @@ This project implements a production-ready traffic monitoring system that can:
 - **Segment** BDD100K **drivable area** (direct / alternative / background) at the pixel level
 - **Track** objects across video frames with consistent IDs (via Ultralytics + ByteTrack / BoT-SORT)
 
+## Try the demos
+
+From the **project root**, after `pip install -r requirements.txt`, replace `yolov8n.pt` with your trained `best.pt` if you have one:
+
+```bash
+# Tk desktop app: queue images/videos, before/after, play/pause, optional tracking IDs
+python demo_upload_window.py --weights yolov8n.pt
+
+# OpenCV window: folder of images; Space toggles raw vs detections (needs GUI OpenCV, not headless)
+python demo_before_after.py --weights yolov8n.pt --source bdd100k_yolo_format/val/images
+
+# Browser UI (install Gradio first: pip install -r requirements-webui.txt)
+python app_upload_before_after.py --weights yolov8n.pt
+```
+
+See **Usage → Optional helper scripts** for controls, tracking flags, and troubleshooting (OpenCV / Gradio).
+
 ## What is implemented today
 
 | Area | Status |
